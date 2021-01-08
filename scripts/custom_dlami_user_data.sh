@@ -27,7 +27,8 @@ if [ ! -d "$MEGATRON_DIRECTORY" ]; then
     echo "Megatron repository not found. Installing..."
     git clone https://github.com/NVIDIA/Megatron-LM/ $MEGATRON_DIRECTORY
     chown -R ec2-user:ec2-user $MEGATRON_DIRECTORY
-    $PIP_EXEC install pipenv transformers dataclasses pybind11 tensorboard jupyterlab
+    $PIP_EXEC install pipenv transformers dataclasses pybind11 wikiextractor tensorboard jupyterlab
+    $PIP_EXEC install -e $MEGATRON_DIRECTORY -U
 fi
 
 if [ ! -d $APEX ]; then

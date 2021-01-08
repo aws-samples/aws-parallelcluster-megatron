@@ -51,7 +51,7 @@ The base AMI for customization is an AWS Deep Learning AMI (DLAMI). It already p
 
 To build the custom AMI from the root of the sample project, use the `pcluster createami` command as shown in the script [create_custom_ami.sh](./scripts/create_custom_ami.sh). The command uses the DLAMI v38.0 `ami-01a495658aa5f7930` on `us-west-2` region. Modify it according to your specific region.
 
-The command calls for the script [custom_dlami_install.sh](./scripts/custom_dlami_install.sh), which installs Megatron-LM and its dependencies, including NVIDIA APEX. The instance used for the build is `-i p4d.24xlarge`, as NVIDIA APEX will be compiled to the host's platform during installation. 
+The command calls for the script [custom_dlami_user_data.sh](./scripts/custom_dlami_user_data.sh), which installs Megatron-LM and its dependencies, including NVIDIA APEX. The instance used for the build is `-i p4d.24xlarge`, as NVIDIA APEX will be compiled to the host's platform during installation. 
 
 This command specifies an alternative config file to the default one: [`-c $(pwd)/configs/base-config-build-ami.ini`](./configs/base-config-build-ami.ini). This argument is not required if a default configuration file was created during the ParallelCluster installation. Modify the argument values between `<...>` accordingly.   
 
@@ -103,7 +103,7 @@ fsx_settings = sharedfsx
 
 Create the cluster with: `pcluster create megatron-on-pcluster -c configs/multi-queue-config.ini`
 
-Once peloyment completes you get the Master Node's public and private ips printed on the screen:
+Once peloyment completes you get the Head Node's public and private ips printed on the screen:
 
 ```bash
 Creating stack named: parallelcluster-megatron-on-pcluster
@@ -113,4 +113,38 @@ ClusterUser: ec2-user
 MasterPrivateIP: xxx.xxx.xx.xxx
 ```
 
-Access the cluster master node using the cli command `pcluster ssh megatron-on-pcluster -i ~/.ssh/<Your Key Pair name>`
+Access the cluster Head node using the cli command `pcluster ssh megatron-on-pcluster -i ~/.ssh/<Your Key Pair name>`
+
+
+## Preparing the Dataset wth CPU instances
+
+Once in the cluster head node, set-up a data folder in the _/lustre_ directory and download the latest English Wikipedia data dump from Wikimedia:
+
+```bash
+export DATA_DIR=/lustre/data
+mkdir -p $DATA_DIR && cd $DATA_DIR
+
+wget https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2
+
+```
+
+Download the vocab and merge table files for the desired model. This example uses the GPT-2 model:
+ 
+```bash
+export DATA_DIR=/lustre/data
+export GPT2_DATA=${DATA_DIR}/gpt2
+
+mkdir -p ${GPT2_DATA} && cd ${GPT2_DATA}
+
+wget https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-vocab.json
+wget https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-merges.txt
+
+mkdir -p ${GPT2_DATA}/checkpoint
+wget --content-disposition https://api.ngc.nvidia.com/v2/models/nvidia/megatron_lm_345m/versions/v0.0/zip -O ${GPT2_DATA}/checkpoint/megatron_lm_345m_v0.0.zip
+```
+
+Once the the data is available, provision a cpu node using slurm: `salloc --nnodes 1 -p cpu`.
+
+
+
+

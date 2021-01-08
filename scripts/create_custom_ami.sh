@@ -12,6 +12,6 @@ pcluster createami -ai ami-01a495658aa5f7930 \
 	-ap megatron-on-pcluster- \
 	-c $(pwd)/configs/base-config-build-ami.ini \
 	-i p4d.24xlarge \
-	--post-install file://$(pwd)/scripts/custom_dlami_install.sh \
+	--post-install file://$(pwd)/scripts/custom_dlami_user_data.sh \
 	-r us-west-2
 

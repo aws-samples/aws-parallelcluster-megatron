@@ -118,11 +118,12 @@ Access the cluster Head node using the cli command `pcluster ssh megatron-on-pcl
 
 ## Preparing the Dataset wth CPU instances
 
-Once in the cluster head node, set-up a data folder in the _/lustre_ directory and download the latest English Wikipedia data dump from Wikimedia:
+Once in the cluster head node, set-up a data folder in the _/lustre_ directory and download the latest English Wikipedia data dump from Wikimedia. This process follows the original [Megatron-LM documentation](https://github.com/NVIDIA/Megatron-LM#datasets):
 
 ```bash
-export DATA_DIR=/lustre/data
-mkdir -p $DATA_DIR && cd $DATA_DIR
+export WIKI_DIR=/lustre/data/wiki
+mkdir -p $WIKI_DIR && cd $WIKI_DIR
+
 
 wget https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2
 
@@ -143,7 +144,56 @@ mkdir -p ${GPT2_DATA}/checkpoint
 wget --content-disposition https://api.ngc.nvidia.com/v2/models/nvidia/megatron_lm_345m/versions/v0.0/zip -O ${GPT2_DATA}/checkpoint/megatron_lm_345m_v0.0.zip
 ```
 
-Once the the data is available, provision a cpu node using slurm: `salloc --nnodes 1 -p cpu`.
+Once the the data is available, provision a cpu node using slurm: `salloc --nodes 1 -p cpu`.
+
+All data preprocesing work will proceed from the CPU machine. You can check the provisioning status of your new machine using the `squeue` command. Once the status, _ST_, changes to running, _R_, access the CPU machine terminal through ssh with: `ssh cpu-dy-c5n18xlarge-1`.
+
+Extract the downloaded data using WikiExtractor:
+
+```bash
+conda activate pytorch_latest_p37
+python -m wikiextractor.WikiExtractor --json /lustre/data/wiki/enwiki-latest-pages-articles.xml.bz2 --output /lustre/data/wiki/text/ -q --processes 70 2>&1 | tee wikiextract.out &
+```
+
+Wikiextractor first preprocesses the template of all pages sequentially, followed by a Map/Reduce process for extracting the pages and converting to the loose json format required by Megatron-LM. 
+
+Once the extraction completes, we merge the text files with:
+
+```bash
+find /lustre/data/wiki/text/ -name wiki* | parallel -m -j 70 "cat {} >> mergedfile.json"
+```
+
+Then, create the binary data format for Megatron GPT2:
+
+```bash
+python3 /shared/megatron/tools/preprocess_data.py \
+       --input mergedfile.json \
+       --output-prefix my-gpt2 \
+       --vocab /lustre/data/gpt2/gpt2-vocab.json \
+       --dataset-impl mmap \
+       --tokenizer-type GPT2BPETokenizer \
+       --merge-file /lustre/data/gpt2/gpt2-merges.txt \
+       --append-eod 
+       --workers 70
+```
+
+Once all preprocessing is done we can persist the data from FSx back to S3 using a [Data Repository Task](https://docs.aws.amazon.com/fsx/latest/LustreGuide/export-data-repo-task.html) from the terminal used to spin up the cluster. This guarantees that data gets persisted even if the cluster is termindated.
+
+```bash
+# Retrieve the FSx for Lustre file system Id
+export FSX_ID=$(aws fsx describe-file-systems --query "FileSystems[?LustreConfiguration.DataRepositoryConfiguration.ExportPath=='s3://<Your Bucket Name>'].FileSystemId" --output text)
+# Create data repository task
+aws fsx create-data-repository-task \
+    --file-system-id $FSX_ID \
+    --type EXPORT_TO_REPOSITORY \
+    --paths data \
+    --report Enabled=true,Scope=FAILED_FILES_ONLY,Format=REPORT_CSV_20191124,Path=s3://mega-on-pcluster/reports
+```
+
+You can exit to the original terminal with the `exit` command 3 times: (1) for exiting the `ssh` session on the CPU node, (2) for the `salloc` slurm allocation and (3) for the `pcluster ssh` on the master node. 
+
+## Model Parallel Trainin on a p4d.24xlarge UltraCluster 
+
 
 
 

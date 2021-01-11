@@ -8,7 +8,7 @@
 
 #!/bin/bash
 #This script is based on the DLAMI v36 ami-0f899ff8474ea45a9
-yum install htop -y 
+yum install htop parallel -y 
 
 sudo rm /usr/local/cuda
 ln -s /usr/local/cuda-11.0 /usr/local/cuda

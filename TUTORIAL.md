@@ -2,10 +2,9 @@
 
 This repo contains sample scripts to train the NVIDIA Megatron-LM in AWS using AWS ParallelCluster. 
 
-## TODO:
- - [ ] Add call out to technologies and ultracluster, including picture. 
- - [ ] Include link to Megatron paper
- - [ ] Add index
+## Contents:
+
+
 
 ## Setting up the environment 
 #### Local 
@@ -190,7 +189,7 @@ aws fsx create-data-repository-task \
     --file-system-id $FSX_ID \
     --type EXPORT_TO_REPOSITORY \
     --paths data \
-    --report Enabled=true,Scope=FAILED_FILES_ONLY,Format=REPORT_CSV_20191124,Path=s3://mega-on-pcluster/reports
+    --report Enabled=true,Scope=FAILED_FILES_ONLY,Format=REPORT_CSV_20191124,Path=s3://<Your Bucket Name>/reports
 ```
 
 You can exit to the original terminal with the `exit` command 2 times: (1) for exiting the `ssh` session on the CPU node, (2) for the `salloc` slurm allocation. 
@@ -235,5 +234,11 @@ Using the following `ssh` tunel configuration when connecting to the head node, 
 pcluster ssh megatron-on-pcluster -i ~/.ssh/<Your Key Pair name> -L 8080:localhost:8080
 ```
 
+### Interacting with the cluster through JupyterLab
 
+The same startegy used to monitor training 
+
+```bash
+jupyter lab --port=8060 --ip=0.0.0.0 2>&1 | tee ~/jupyter.logs &!
+```
 

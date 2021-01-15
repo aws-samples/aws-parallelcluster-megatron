@@ -45,7 +45,7 @@ aws s3 mb s3://<Your Bucket name>
 
 ## Building an Custom AMI
 
-[Build a custom AMI](https://docs.aws.amazon.com/parallelcluster/latest/ug/tutorials_02_ami_customization.html) to avoid long provisioning times associated with [post installation scripts](https://docs.aws.amazon.com/parallelcluster/latest/ug/cluster-definition.html#post-install) for Megatron-LM dependencies. 
+[Build a custom AMI](https://docs.aws.amazon.com/parallelcluster/latest/ug/tutorials_02_ami_customization.html) to avoid long provisioning times associated with using [post installation scripts](https://docs.aws.amazon.com/parallelcluster/latest/ug/cluster-definition.html#post-install) for Megatron-LM dependencies. 
 
 The base AMI for customization is an AWS Deep Learning AMI (DLAMI). It already provides the required software to run distributed training of large machine learning models, including NVIDIA drivers and CUDA, EFA plugins and the major deep learning frameworks such as PyTorch and Tensorflow, managed in Conda environments. The Conda package manager can also manage the Megatron-LM dependencies.
 
@@ -160,22 +160,25 @@ Wikiextractor first preprocesses the template of all pages sequentially, followe
 Once the extraction completes, we merge the text files with:
 
 ```bash
+cd /lustre/data/wiki
 find /lustre/data/wiki/text/ -name wiki* | parallel -m -j 70 "cat {} >> mergedfile.json"
 ```
 
-Then, create the binary data format for Megatron GPT2:
+The `mergedfile.json` size on disk is 16GB. With it, create the binary data format for Megatron GPT2:
 
 ```bash
-python3 /shared/megatron/tools/preprocess_data.py \
-       --input mergedfile.json \
+python /home/ec2-user/megatron/tools/preprocess_data.py \
+       --input /lustre/data/wiki/mergedfile.json \
        --output-prefix my-gpt2 \
        --vocab /lustre/data/gpt2/gpt2-vocab.json \
        --dataset-impl mmap \
        --tokenizer-type GPT2BPETokenizer \
        --merge-file /lustre/data/gpt2/gpt2-merges.txt \
-       --append-eod 
+       --append-eod \
        --workers 70
 ```
+
+Refer to [this solution](https://github.com/NVIDIA/Megatron-LM/issues/62) if an `IndexError: list index out of range` occurs.
 
 Once all preprocessing is done we can persist the data from FSx back to S3 using a [Data Repository Task](https://docs.aws.amazon.com/fsx/latest/LustreGuide/export-data-repo-task.html) from the terminal used to spin up the cluster. This guarantees that data gets persisted even if the cluster is termindated.
 
@@ -190,11 +193,47 @@ aws fsx create-data-repository-task \
     --report Enabled=true,Scope=FAILED_FILES_ONLY,Format=REPORT_CSV_20191124,Path=s3://mega-on-pcluster/reports
 ```
 
-You can exit to the original terminal with the `exit` command 3 times: (1) for exiting the `ssh` session on the CPU node, (2) for the `salloc` slurm allocation and (3) for the `pcluster ssh` on the master node. 
+You can exit to the original terminal with the `exit` command 2 times: (1) for exiting the `ssh` session on the CPU node, (2) for the `salloc` slurm allocation. 
 
 ## Model Parallel Trainin on a p4d.24xlarge UltraCluster 
 
+In this section you will train the 8 billion parameters version of Megatron-LM GPT-2 model across 64 GPUs - 8 p4d.24xlarge instances. Log back into the cluster head node using `pcluster ssh ...` if not already on the machine. 
 
+Start by creating a training script according to the [original documentation](https://github.com/NVIDIA/Megatron-LM/blob/main/examples/pretrain_gpt_distributed.sh). To train using `slurm` on 8 nodes, modify the distributed world configuration section according to the script [scripts/train_8B_gpt2.sh](./scripts/train_8B_gpt2.sh). Make sure to include the CUDA, EFA and NCCL environment variables to enable NCCL to communicate between GPUs through AWS EFA using GPU Remote Direct Memory Access. 
+
+To drive the `sbatch` execution of the training script, wrap it on a `job.sh` script, using a shared path across all nodes, such as `/lustre/scripts`. :
+
+```bash
+#!/bin/bash
+#SBATCH --wait-all-nodes=1
+#SBATCH -p gpu
+#SBATCH -n 8
+#SBATCH -N 8
+#SBATCH -o out_%j.out
+srun /lustre/scripts/train_8B_gpt2.sh
+```
+
+Now you can start training by running `sbatch job.sh` from the head node on the cluster. The output from the run will be recorded on the `.out` file on the current folder. If your job fails with `slurmstepd: error: execve(): /lustre/scripts/train_8B_gpt2.sh: Permission denied`, change the permissions of your scripts with `chmod +x /lustre/scripts/*.sh`.
+
+Inspecting the NCCL logs in the `.out` file expect to find entries that describe the OFI provide to EFA, such as below:
+
+```bash
+gpu-dy-p4d24xlarge-10:33337:33337 [0] NCCL INFO NET/OFI Selected Provider is efa
+```
+
+### Monitoring training with Tensorboard
+
+The Megatron-LM framework writes tensorboard logs to the `--tensorboard-dir` specified on the training script. The custo AMI built for the cluster has tensorboard installed on the `pytorch_latest_p37` environment used for training. Use the to start a tensorboard silently and expose it in a specific port:
+
+```bash
+python -m tensorboard.main --port=8080 --logdir /lustre/logs --host 0.0.0.0  2>&1 | tee ~/tensorboard.logs &!
+```
+
+Using the following `ssh` tunel configuration when connecting to the head node, you can access tensorboard on `localhost:8080`:
+
+```bash
+pcluster ssh megatron-on-pcluster -i ~/.ssh/<Your Key Pair name> -L 8080:localhost:8080
+```
 
 
 

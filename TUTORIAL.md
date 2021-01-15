@@ -1,13 +1,24 @@
 # Megatron on AWS UltraCluster
 
-This repo contains sample scripts to train the NVIDIA Megatron-LM in AWS using AWS ParallelCluster. 
+This tutorial walks through the end-to-end process of configuring a cluster with AWS ParallelCluster, with a customized Deep Learning AMI, preprocessing a large dataset using large CPU Amazon EC2 instances and training a GPT-2 Natural Language Understanding model using an AWS EC2 UltraCluster. 
+
+Familiarity with AWS cloud concepts of Virtual Private Cloud (VPC), e.g Subnets and Availability Zones, the AWS CLI and bash scripting is recommended. 
 
 ## Contents:
 
+ * [Contents](#contents)
+ * [ParallelCluster Management Setup](#parallelcluster-management-setup)
+    * [Local Environment](#local-environement)
+    * [AWS](#aws)
+ * [Building an Custom AMI](#building-an-custom-ami)
+ * [Configure and Deploy a Cluster](#configure-and-deploy-a-cluster)
+ * [Preprocessing the Training Dataset wth CPU Instances](#preprocessing-the-training-dataset-wth-cpu-instances)
+ * [Model Parallel Trainin on a p4d.24xlarge UltraCluster](#model-parallel-trainin-on-a-p4d24xlarge-ultracluster)
+    * [Monitoring Training with Tensorboard](#monitoring-training-with-tensorboard)
 
 
-## Setting up the environment 
-#### Local 
+## ParallelCluster Management Setup 
+#### Local Environment
 
 To deploy a cluster with AWS ParallelCluster you'll need to install the `aws-parallelcluster` cli. From the root of this project execute the following to create and activate a virtual environment with Parallelcluster installed:
 
@@ -22,7 +33,7 @@ To execute this sample repo, you will need credentials to access the AWS CLI. Re
 
 You'll also need [Hashicorp Packer](https://www.packer.io/downloads.html) for building custom AMIs.
 
-#### Cloud 
+#### AWS 
 
 This sample repo assumes an existing VPC with private and public subnets. For details on how to provision such infrastructure check out the [this tutorial](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/create-public-private-vpc.html). Private subnets are a requirement for running p4d.24xlarge instances with 4 EFA cards. 
 
@@ -31,6 +42,8 @@ Use the following commands to list VPCs, Subnets and AvailabilityZones:
 ```bash
 aws ec2 describe-subnets --query 'Subnets[].{VPC:VpcId,SUBNET:SubnetId,AZ:AvailabilityZone}'
 ```
+
+Take note of the Ids to properly configure the cluster environment. 
 
 This sample also requires an S3 bucket and a EC2 key pair. You can use the following AWS CLI commands to create new ones:
 
@@ -115,7 +128,7 @@ MasterPrivateIP: xxx.xxx.xx.xxx
 Access the cluster Head node using the cli command `pcluster ssh megatron-on-pcluster -i ~/.ssh/<Your Key Pair name>`
 
 
-## Preparing the Dataset wth CPU instances
+## Preprocessing the Training Dataset wth CPU instances
 
 Once in the cluster head node, set-up a data folder in the _/lustre_ directory and download the latest English Wikipedia data dump from Wikimedia. This process follows the original [Megatron-LM documentation](https://github.com/NVIDIA/Megatron-LM#datasets):
 
@@ -233,12 +246,3 @@ Using the following `ssh` tunel configuration when connecting to the head node, 
 ```bash
 pcluster ssh megatron-on-pcluster -i ~/.ssh/<Your Key Pair name> -L 8080:localhost:8080
 ```
-
-### Interacting with the cluster through JupyterLab
-
-The same startegy used to monitor training 
-
-```bash
-jupyter lab --port=8060 --ip=0.0.0.0 2>&1 | tee ~/jupyter.logs &!
-```
-

@@ -8,9 +8,9 @@ This is a repository with scripts and configuration files for training a GPT typ
 
 ## Structure
 
-This repo contains [AWS ParallelCluster](https://aws.amazon.com/hpc/parallelcluster/) configuration files in the [`configs`](./configs) folder to stand up a tightly coupled cluster of [p4d.24xlarge EC2 instances](https://aws.amazon.com/ec2/instance-types/p4/), leveraging [AWS Elastic Fabric Adapter (EFA)](https://aws.amazon.com/hpc/efa/) and [Amazon FSx for Lustre](https://aws.amazon.com/fsx/lustre/) in a P4D UltraCluster configuration. 
+This repo contains configuration files for [AWS ParallelCluster](https://aws.amazon.com/hpc/parallelcluster/) in the [`configs`](./configs) folder. The configurations implement a tightly coupled cluster of [p4d.24xlarge EC2 instances](https://aws.amazon.com/ec2/instance-types/p4/), leveraging [AWS Elastic Fabric Adapter (EFA)](https://aws.amazon.com/hpc/efa/) and [Amazon FSx for Lustre](https://aws.amazon.com/fsx/lustre/) in a P4D UltraCluster configuration. 
 
-The [`scripts`](./scripts) folder contains the scripts required to build a custom Deep Learning AMI with Megatron-LM and its requirements. It also contains the scripts to train a GPT-2 8 billion parammeter model, in a 8-way model parallel configuration, using the [SLURM scheduler](https://docs.aws.amazon.com/parallelcluster/latest/ug/schedulers.slurm.html) available through ParallelCluster. 
+The [`scripts`](./scripts) folder contains scripts to build a custom [Deep Learning AMI](https://docs.aws.amazon.com/dlami/latest/devguide/what-is-dlami.html) with Megatron-LM and its dependencies. It also contains scripts to train a GPT-2 8 billion parameter model, in a 8-way model parallel configuration, using the [SLURM scheduler](https://docs.aws.amazon.com/parallelcluster/latest/ug/schedulers.slurm.html) available through ParallelCluster. 
 
 The [TUTORIAL.md](TUTORIAL.md) describes how-to:
  - Set-up a cluster management environment with AWS ParallelCluster.

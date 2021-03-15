@@ -213,7 +213,9 @@ All data preprocesing work will proceed from the CPU machine. You can check the 
 Extract the downloaded data using WikiExtractor:
 
 ```bash
-conda activate pytorch_latest_p37
+git clone https://github.com/attardi/wikiextractor.git /lustre/wikiextractor
+cd /lustre/wikiextractor
+cd -
 python -m wikiextractor.WikiExtractor --json /lustre/data/wiki/enwiki-latest-pages-articles.xml.bz2 --output /lustre/data/wiki/text/ -q --processes 70 2>&1 | tee wikiextract.out &
 ```
 
@@ -222,11 +224,15 @@ Wikiextractor first preprocesses the template of all pages sequentially, followe
 Once the extraction completes, we merge the text files with:
 
 ```bash
+conda activate pytorch_latest_p37
 cd /lustre/data/wiki
 find /lustre/data/wiki/text/ -name wiki* | parallel -m -j 70 "cat {} >> mergedfile.json"
 ```
 
-The `mergedfile.json` size on disk is 16GB. With it, create the binary data format for Megatron GPT2:
+The `mergedfile.json` size on disk is 16GB. With it, create the binary data format for Megatron GPT2.
+**NOYE**: Refer to [this solution](<https://github.com/NVIDIA/Megatron-LM/issues/62>) if an `IndexError: list index out of range` occurs.
+
+To create the binary data, type the following command:
 
 ```bash
 python /home/ec2-user/megatron/tools/preprocess_data.py \
@@ -240,20 +246,19 @@ python /home/ec2-user/megatron/tools/preprocess_data.py \
     --workers 70
 ```
 
-Refer to [this solution](<https://github.com/NVIDIA/Megatron-LM/issues/62>) if an `IndexError: list index out of range` occurs.
-
 Once all preprocessing is done we can persist the data from FSx back to S3 using a [Data Repository Task](<https://docs.aws.amazon.com/fsx/latest/LustreGuide/export-data-repo-task.html>) from the terminal used to spin up the cluster.
-This guarantees that data gets persisted even if the cluster is termindated.
+This guarantees that data gets persisted even if the cluster is terminated.
 
 ```bash
 # Retrieve the FSx for Lustre file system Id
-export FSX_ID=$(aws fsx describe-file-systems --query "FileSystems[?LustreConfiguration.DataRepositoryConfiguration.ExportPath=='s3://<Your Bucket Name>'].FileSystemId" --output text)
+export FSX_ID=$(aws fsx describe-file-systems --query "FileSystems[?LustreConfiguration.DataRepositoryConfiguration.ExportPath=='s3://${BUCKET_NAME}'].FileSystemId" --output text --region ${AWS_REGION})
 # Create data repository task
 aws fsx create-data-repository-task \
     --file-system-id $FSX_ID \
     --type EXPORT_TO_REPOSITORY \
     --paths data \
-    --report Enabled=true,Scope=FAILED_FILES_ONLY,Format=REPORT_CSV_20191124,Path=s3://<Your Bucket Name>/reports
+    --report Enabled=true,Scope=FAILED_FILES_ONLY,Format=REPORT_CSV_20191124,Path=s3://${BUCKET_NAME}/reports \
+    --region ${AWS_REGION}
 ```
 
 You can exit to the original terminal with the `exit` command 2 times: (1) for exiting the `ssh` session on the CPU node, (2) for the `salloc` slurm allocation.
@@ -266,9 +271,89 @@ Start by creating a training script according to the [original documentation](<h
 To train using `slurm` on 8 nodes, modify the distributed world configuration section according to the script [scripts/train\_8B\_gpt2.sh](<./scripts/train_8B_gpt2.sh>).
 Make sure to include the CUDA, EFA and NCCL environment variables to enable NCCL to communicate between GPUs through AWS EFA using GPU Remote Direct Memory Access.
 
-To drive the `sbatch` execution of the training script, wrap it on a `job.sh` script, using a shared path across all nodes, such as `/lustre/scripts`. :
+Create a file named `/lustre/scripts/train\_8B\_gpt2.sh` and copy the content below in it.
 
 ```bash
+# scripts/train_8B_gpt2.sh
+
+#!/bin/bash
+
+# Shared data paths from Fsx for Luster mount point /lustre
+DATA_PATH=/lustre/data/wiki/my-gpt2_text_document
+CHECKPOINT_PATH=/lustre/data/gpt2/checkpoint
+VOCAB_FILE=/lustre/data/gpt2/gpt2-vocab.json
+MERGES_FILE=/lustre/data/gpt2/gpt2-merges.txt
+
+# Distributed World configuration
+MP_SIZE=8
+GPUS_PER_NODE=8
+DDP_IMPL=torch
+MASTER_ADDR=$SLURM_SUBMIT_HOST
+MASTER_PORT=6000
+NNODES=$SLURM_NTASKS
+NODE_RANK=$SLURM_NODEID
+WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
+
+# CUDA, EFA and NCCL configs
+export LD_LIBRARY_PATH=/usr/local/cuda-11.0/efa/lib:/usr/local/cuda-11.0/lib:/usr/local/cuda-11.0/lib64:/usr/local/cuda-11.0:/opt/amazon/efa/lib64:/opt/amazon/openmpi/lib64:$LD_LIBRARY_PATH
+export FI_PROVIDER=efa
+export FI_EFA_USE_DEVICE_RDMA=1
+export NCCL_ALGO=ring
+export NCCL_DEBUG=INFO
+export RDMAV_FORK_SAFE=1
+
+# Distributed args for Pytorch DDP
+DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $NODE_RANK --master_addr $MASTER_ADDR --master_port $MASTER_PORT"
+
+# Training:
+/home/ec2-user/anaconda3/envs/pytorch_latest_p37/bin/python -m torch.distributed.launch $DISTRIBUTED_ARGS \
+    /home/ec2-user/megatron/pretrain_gpt2.py \
+    --model-parallel-size $MP_SIZE \
+    --DDP-impl $DDP_IMPL \
+    --num-layers 42 \
+    --hidden-size 4096 \
+    --num-attention-heads 32 \
+    --batch-size 16 \
+    --seq-length 1024 \
+    --max-position-embeddings 1024 \
+    --train-iters 1000 \
+    --lr-decay-iters 320000 \
+    --save $CHECKPOINT_PATH \
+    --load $CHECKPOINT_PATH \
+    --data-path $DATA_PATH \
+    --vocab-file $VOCAB_FILE \
+    --merge-file $MERGES_FILE \
+    --data-impl mmap \
+    --split 949,50,1 \
+    --distributed-backend nccl \
+    --lr 0.00015 \
+    --lr-decay-style cosine \
+    --min-lr 1.0e-5 \
+    --weight-decay 1e-2 \
+    --clip-grad 1.0 \
+    --warmup .01 \
+    --checkpoint-activations \
+    --distribute-checkpointed-activations \
+    --log-interval 50 \
+    --save-interval 1000 \
+    --eval-interval 1000 \
+    --eval-iters 10 \
+    --num-workers 2 \
+    --fp16 \
+    --tensorboard-dir /lustre/logs/gpt2_param8B_nodes16_bs16_sjob${SLURM_JOB_ID}
+
+set +x
+```
+
+```bash
+chmod +x /lustre/scripts/train\_8B\_gpt2.sh
+```
+
+To drive the `sbatch` execution of the trainning script, wrap it on a `job.sh` script, using a shared path across all nodes, such as `/lustre/scripts` :
+
+```bash
+mkdir -p /lustre/scripts
+cat > /lustre/scripts/job.sh << EOF
 #!/bin/bash
 #SBATCH --wait-all-nodes=1
 #SBATCH -p gpu
@@ -276,6 +361,9 @@ To drive the `sbatch` execution of the training script, wrap it on a `job.sh` sc
 #SBATCH -N 8
 #SBATCH -o out_%j.out
 srun /lustre/scripts/train_8B_gpt2.sh
+EOF
+
+sbatch /lustre/scripts/job.sh
 ```
 
 Now you can start training by running `sbatch job.sh` from the head node on the cluster. The output from the run will be recorded on the `.out` file on the current folder.
@@ -299,5 +387,5 @@ python -m tensorboard.main --port=8080 --logdir /lustre/logs --host 0.0.0.0  2>&
 Using the following `ssh` tunel configuration when connecting to the head node, you can access tensorboard on `localhost:8080`:
 
 ```bash
-pcluster ssh megatron-on-pcluster -i ~/.ssh/<Your Key Pair name> -L 8080:localhost:8080
+pcluster ssh megatron-on-pcluster -i ~/.ssh/${SSH_KEY_NAME} -L 8080:localhost:8080
 ```

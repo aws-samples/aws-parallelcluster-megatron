@@ -8,7 +8,7 @@
 
 #!/bin/bash
 #This script is based on the DLAMI v36 ami-0f899ff8474ea45a9
-yum install htop parallel -y 
+yum install htop parallel -y
 
 sudo rm /usr/local/cuda
 ln -s /usr/local/cuda-11.0 /usr/local/cuda
@@ -25,7 +25,7 @@ APEX=$USR_HOME/apex
 if [ ! -d "$MEGATRON_DIRECTORY" ]; then
     # control will enter here if $DIRECTORY doesn't exist.
     echo "Megatron repository not found. Installing..."
-    git clone https://github.com/NVIDIA/Megatron-LM/ $MEGATRON_DIRECTORY
+    git clone -b v1.1 https://github.com/NVIDIA/Megatron-LM/ $MEGATRON_DIRECTORY
     chown -R ec2-user:ec2-user $MEGATRON_DIRECTORY
     $PIP_EXEC install pipenv transformers dataclasses pybind11 wikiextractor tensorboard jupyterlab
     $PIP_EXEC install -e $MEGATRON_DIRECTORY -U
@@ -36,7 +36,7 @@ if [ ! -d $APEX ]; then
     echo "Apex directory doesn't exist, installing..."
     git clone https://www.github.com/nvidia/apex $APEX
     chown -R ec2-user:ec2-user $APEX
-    $PIP_EXEC install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" $APEX 
+    $PIP_EXEC install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" $APEX
 fi
 
 chown -R ec2-user:ec2-user $USR_HOME
